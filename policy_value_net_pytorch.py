@@ -74,7 +74,7 @@ class PolicyValueNet():
                                     weight_decay=self.l2_const)
 
         if model_file:
-            net_params = torch.load(model_file)
+            net_params = torch.load(model_file, weights_only=False)
             self.policy_value_net.load_state_dict(net_params)
 
     def policy_value(self, state_batch):
@@ -146,7 +146,7 @@ class PolicyValueNet():
         entropy = -torch.mean(
                 torch.sum(torch.exp(log_act_probs) * log_act_probs, 1)
                 )
-        return loss.data[0], entropy.data[0]
+        return loss.item(), entropy.item()
         #for pytorch version >= 0.5 please use the following line instead.
         #return loss.item(), entropy.item()
 

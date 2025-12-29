@@ -11,6 +11,8 @@ class Board(object):
     """board for the game"""
 
     def __init__(self, **kwargs):
+        self.last_move = None
+        self.current_player = None
         self.width = int(kwargs.get('width', 8))
         self.height = int(kwargs.get('height', 8))
         # board states stored as a dict,
@@ -175,6 +177,7 @@ class Game(object):
             current_player = self.board.get_current_player()
             player_in_turn = players[current_player]
             move = player_in_turn.get_action(self.board)
+            # 会在内部进行轮换
             self.board.do_move(move)
             if is_shown:
                 self.graphic(self.board, player1.player, player2.player)
@@ -198,10 +201,11 @@ class Game(object):
             move, move_probs = player.get_action(self.board,
                                                  temp=temp,
                                                  return_prob=1)
-            # store the data
+            # 保存: 状态、概率、选手
             states.append(self.board.current_state())
             mcts_probs.append(move_probs)
             current_players.append(self.board.current_player)
+
             # perform a move
             self.board.do_move(move)
             if is_shown:
@@ -213,6 +217,7 @@ class Game(object):
                 if winner != -1:
                     winners_z[np.array(current_players) == winner] = 1.0
                     winners_z[np.array(current_players) != winner] = -1.0
+
                 # reset MCTS root node
                 player.reset_player()
                 if is_shown:
