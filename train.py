@@ -12,8 +12,8 @@ from collections import defaultdict, deque
 from game import Board, Game
 from mcts_pure import MCTSPlayer as MCTS_Pure
 from mcts_alphaZero import MCTSPlayer
-from policy_value_net import PolicyValueNet  # Theano and Lasagne
-# from policy_value_net_pytorch import PolicyValueNet  # Pytorch
+# from policy_value_net import PolicyValueNet  # Theano and Lasagne
+from policy_value_net_pytorch import PolicyValueNet  # Pytorch
 # from policy_value_net_tensorflow import PolicyValueNet # Tensorflow
 # from policy_value_net_keras import PolicyValueNet # Keras
 
@@ -21,9 +21,9 @@ from policy_value_net import PolicyValueNet  # Theano and Lasagne
 class TrainPipeline():
     def __init__(self, init_model=None):
         # params of the board and the game
-        self.board_width = 6
-        self.board_height = 6
-        self.n_in_row = 4
+        self.board_width = 8
+        self.board_height = 8
+        self.n_in_row = 5
         self.board = Board(width=self.board_width,
                            height=self.board_height,
                            n_in_row=self.n_in_row)
@@ -60,6 +60,7 @@ class TrainPipeline():
                                       n_playout=self.n_playout,
                                       is_selfplay=1)
 
+    # 数据扩充
     def get_equi_data(self, play_data):
         """augment the data set by rotation and flipping
         play_data: [(state, mcts_prob, winner_z), ..., ...]
@@ -82,6 +83,7 @@ class TrainPipeline():
                                     winner))
         return extend_data
 
+    # 收集自我 博弈 数据
     def collect_selfplay_data(self, n_games=1):
         """collect self-play data for training"""
         for i in range(n_games):
@@ -166,19 +168,22 @@ class TrainPipeline():
         """run the training pipeline"""
         try:
             for i in range(self.game_batch_num):
+                # 收集数据
                 self.collect_selfplay_data(self.play_batch_size)
                 print("batch i:{}, episode_len:{}".format(
                         i+1, self.episode_len))
+                # 更新模型
                 if len(self.data_buffer) > self.batch_size:
                     loss, entropy = self.policy_update()
+
                 # check the performance of the current model,
                 # and save the model params
                 if (i+1) % self.check_freq == 0:
-                    print("current self-play batch: {}".format(i+1))
+                    print("已经训练: {}轮".format(i+1))
                     win_ratio = self.policy_evaluate()
                     self.policy_value_net.save_model('./current_policy.model')
                     if win_ratio > self.best_win_ratio:
-                        print("New best policy!!!!!!!!")
+                        print("相较于MCTS@{}, 截至目前的最佳胜率={} !!!!!!!!".format(self.pure_mcts_playout_num, win_ratio))
                         self.best_win_ratio = win_ratio
                         # update the best_policy
                         self.policy_value_net.save_model('./best_policy.model')

@@ -161,6 +161,7 @@ class Game(object):
                     print('_'.center(8), end='')
             print('\r\n\r\n')
 
+    # 实战对弈
     def start_play(self, player1, player2, start_player=0, is_shown=1):
         """start a game between two players"""
         if start_player not in (0, 1):
@@ -190,6 +191,7 @@ class Game(object):
                         print("Game end. Tie")
                 return winner
 
+    # 自我博弈训练
     def start_self_play(self, player, is_shown=0, temp=1e-3):
         """ start a self-play game using a MCTS player, reuse the search tree,
         and store the self-play data: (state, mcts_probs, z) for training
@@ -198,6 +200,7 @@ class Game(object):
         p1, p2 = self.board.players
         states, mcts_probs, current_players = [], [], []
         while True:
+            # MCTS 落子
             move, move_probs = player.get_action(self.board,
                                                  temp=temp,
                                                  return_prob=1)
@@ -206,7 +209,7 @@ class Game(object):
             mcts_probs.append(move_probs)
             current_players.append(self.board.current_player)
 
-            # perform a move
+            # perform a move，do_move函数内部实现选手的轮换
             self.board.do_move(move)
             if is_shown:
                 self.graphic(self.board, p1, p2)
@@ -215,6 +218,9 @@ class Game(object):
                 # winner from the perspective of the current player of each state
                 winners_z = np.zeros(len(current_players))
                 if winner != -1:
+                    # 基于 np.array(current_players) == winner 获取 胜利者 索引
+                    # 由于 winners_z 和 current_players 数组长度相同，因此复用索引
+                    # => 为自我对弈的每一步棋局状态，生成对应的「胜负价值标签」
                     winners_z[np.array(current_players) == winner] = 1.0
                     winners_z[np.array(current_players) != winner] = -1.0
 
