@@ -12,18 +12,27 @@ class Board(object):
 
     def __init__(self, **kwargs):
         self.last_move = None
+        self.run_cnt=0  # 已经落了多少子
         self.current_player = None
         self.width = int(kwargs.get('width', 8))
         self.height = int(kwargs.get('height', 8))
+        self.already_move=[]
+
         # board states stored as a dict,
         # key: move as location on the board,
         # value: player as pieces type
+        # 一维坐标 到 玩家编号 的映射
+        # do_move函数有具体置位过程
+        # 作用：快速查询、胜负判断、状态记录
         self.states = {}
+
         # need how many pieces in a row to win
         self.n_in_row = int(kwargs.get('n_in_row', 5))
         self.players = [1, 2]  # player1 and player2
+        print("Board:init: 初始化棋盘")
 
     def init_board(self, start_player=0):
+        print("Board:init_board: 棋盘清零")
         if self.width < self.n_in_row or self.height < self.n_in_row:
             raise Exception('board width and height can not be '
                             'less than {}'.format(self.n_in_row))
@@ -32,8 +41,11 @@ class Board(object):
         self.availables = list(range(self.width * self.height))
         self.states = {}
         self.last_move = -1
+        self.run_cnt=0  # 已经落了多少子
+        self.already_move=[]
 
     def move_to_location(self, move):
+        # 一维坐标 转化为 二维坐标
         """
         3*3 board's moves like:
         6 7 8
@@ -45,6 +57,7 @@ class Board(object):
         w = move % self.width
         return [h, w]
 
+    # 二维坐标 转化为 一维坐标
     def location_to_move(self, location):
         if len(location) != 2:
             return -1
@@ -59,24 +72,32 @@ class Board(object):
         """return the board state from the perspective of the current player.
         state shape: 4*width*height
         """
-
+        # 初始化4类特征
         square_state = np.zeros((4, self.width, self.height))
         if self.states:
+            # 一维坐标: 玩家编号
             moves, players = np.array(list(zip(*self.states.items())))
+            # 当前选手的落子位置
             move_curr = moves[players == self.current_player]
+            # 对手的落子位置
             move_oppo = moves[players != self.current_player]
+            # 当前选手的落子特征
             square_state[0][move_curr // self.width,
                             move_curr % self.height] = 1.0
+            # 对手的落子特征
             square_state[1][move_oppo // self.width,
                             move_oppo % self.height] = 1.0
-            # indicate the last move location
+            # 对手 最后一步的落子特征
             square_state[2][self.last_move // self.width,
                             self.last_move % self.height] = 1.0
+        # 是否先手特征
         if len(self.states) % 2 == 0:
             square_state[3][:, :] = 1.0  # indicate the colour to play
         return square_state[:, ::-1, :]
 
-    def do_move(self, move):
+    def do_move(self, move, show=True):
+        if show:
+            print("当前选手={}, 执行动作={}, 并从棋盘合法动作中去除该动作，进行选手轮换，记录last_move".format(self.current_player, move))
         self.states[move] = self.current_player
         self.availables.remove(move)
         self.current_player = (
@@ -84,6 +105,9 @@ class Board(object):
             else self.players[1]
         )
         self.last_move = move
+        self.run_cnt += 1
+        self.already_move.append(int(move))
+
 
     def has_a_winner(self):
         width = self.width
@@ -136,6 +160,7 @@ class Game(object):
 
     def __init__(self, board, **kwargs):
         self.board = board
+        print("Game:init: 初始化Game")
 
     def graphic(self, board, player1, player2):
         """Draw the board and show game info"""
@@ -196,11 +221,17 @@ class Game(object):
         """ start a self-play game using a MCTS player, reuse the search tree,
         and store the self-play data: (state, mcts_probs, z) for training
         """
+        # 基于MCTS收集数据
         self.board.init_board()
+        # 初始化选手
+        print("Game:start_self_play: 获取棋盘2位选手", self.board.players)
         p1, p2 = self.board.players
+        # 初始化状态、策略、选手
         states, mcts_probs, current_players = [], [], []
         while True:
             # MCTS 落子
+            print("\n\nGame:start_self_play: 当前需要第{}次落子, 当前棋手={}, 已经落的子有:{}, 开始推演-->".format(
+                self.board.run_cnt+1, self.board.current_player, self.board.already_move))
             move, move_probs = player.get_action(self.board,
                                                  temp=temp,
                                                  return_prob=1)
@@ -210,11 +241,13 @@ class Game(object):
             current_players.append(self.board.current_player)
 
             # perform a move，do_move函数内部实现选手的轮换
-            self.board.do_move(move)
+            print("Game:start_self_play: 实际棋盘开始落子, 位置={}\n\n\n".format(move))
+            self.board.do_move(move, show=False)
             if is_shown:
                 self.graphic(self.board, p1, p2)
             end, winner = self.board.game_end()
             if end:
+                print("Game:start_self_play: 对弈结束, 胜利的一方={}".format(winner))
                 # winner from the perspective of the current player of each state
                 winners_z = np.zeros(len(current_players))
                 if winner != -1:
@@ -228,7 +261,7 @@ class Game(object):
                 player.reset_player()
                 if is_shown:
                     if winner != -1:
-                        print("Game end. Winner is player:", winner)
+                        print("Game:start_self_play: Game end. Winner is player:", winner)
                     else:
-                        print("Game end. Tie")
+                        print("Game:start_self_play: Game end. Tie")
                 return winner, zip(states, mcts_probs, winners_z)

@@ -20,6 +20,7 @@ from policy_value_net_pytorch import PolicyValueNet  # Pytorch
 
 class TrainPipeline():
     def __init__(self, init_model=None):
+        print("TrainPipeline:init: 初始化: TrainPipeline")
         # params of the board and the game
         self.board_width = 8
         self.board_height = 8
@@ -32,7 +33,7 @@ class TrainPipeline():
         self.learn_rate = 2e-3
         self.lr_multiplier = 1.0  # adaptively adjust the learning rate based on KL
         self.temp = 1.0  # the temperature param
-        self.n_playout = 400  # num of simulations for each move
+        self.n_playout = 5  # num of simulations for each move， 原始值=400 访问的广度
         self.c_puct = 5
         self.buffer_size = 10000
         self.batch_size = 512  # mini-batch size for training
@@ -41,7 +42,7 @@ class TrainPipeline():
         self.epochs = 5  # num of train_steps for each update
         self.kl_targ = 0.02
         self.check_freq = 50
-        self.game_batch_num = 1500
+        self.game_batch_num = 1500  # 原始1500
         self.best_win_ratio = 0.0
         # num of simulations used for the pure mcts, which is used as
         # the opponent to evaluate the trained policy
@@ -55,6 +56,7 @@ class TrainPipeline():
             # start training from a new policy-value net
             self.policy_value_net = PolicyValueNet(self.board_width,
                                                    self.board_height)
+
         self.mcts_player = MCTSPlayer(self.policy_value_net.policy_value_fn,
                                       c_puct=self.c_puct,
                                       n_playout=self.n_playout,
@@ -87,12 +89,15 @@ class TrainPipeline():
     def collect_selfplay_data(self, n_games=1):
         """collect self-play data for training"""
         for i in range(n_games):
+            print("Game:collect_selfplay_data: 开始自我博弈")
             winner, play_data = self.game.start_self_play(self.mcts_player,
+                                                          is_shown=1,
                                                           temp=self.temp)
             play_data = list(play_data)[:]
             self.episode_len = len(play_data)
             # augment the data
             play_data = self.get_equi_data(play_data)
+            print("TrainPipeline: collect_selfplay_data：数据入栈")
             self.data_buffer.extend(play_data)
 
     def policy_update(self):
@@ -168,12 +173,12 @@ class TrainPipeline():
         """run the training pipeline"""
         try:
             for i in range(self.game_batch_num):
-                # 收集数据
+                print("TrainPipeline:run: 收集数据")
                 self.collect_selfplay_data(self.play_batch_size)
-                print("batch i:{}, episode_len:{}".format(
-                        i+1, self.episode_len))
+                print("batch i:{}, episode_len:{}".format(i+1, self.episode_len))
                 # 更新模型
                 if len(self.data_buffer) > self.batch_size:
+                    print("TrainPipeline:run: 开始模型训练")
                     loss, entropy = self.policy_update()
 
                 # check the performance of the current model,

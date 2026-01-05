@@ -23,13 +23,25 @@ class TreeNode(object):
     its visit-count-adjusted prior score u.
     """
 
-    def __init__(self, parent, prior_p):
+    def __init__(self, parent, prior_p, name=None):
         self._parent = parent
+        self.name = name  # name表示当前节点第一位坐标值
         self._children = {}  # a map from action to TreeNode。动作->子节点的映射
         self._n_visits = 0
-        self._Q = 0  # 收益预估
-        self._u = 0
-        self._P = prior_p
+        self._Q = 0  # exploited  实际价值
+        self._u = 0  # explored   探索价值(其中一个因子是 胜率预估)
+        self._P = prior_p  # 动作先验概率
+        if name<0:
+            print("TreeNode:init: 初始化节点{}".format(name))
+
+    def printChild(self):
+        pass
+        # klist = []
+        # for k, v in self._children.items():
+        #     klist.append(k)
+        #     # v.printChild()
+        # if len(klist)>0:
+        #     print("节点{} 总共有{}个叶子节点， 明细={}".format(self.name, len(klist), klist))
 
     def expand(self, action_priors):
         """Expand tree by creating new children.
@@ -40,8 +52,11 @@ class TreeNode(object):
         for action, prob in action_priors:
             if action not in self._children:
                 # 扩展的子节点的 parent 刚好是self
-                # 初始化先验概率，其他属性都是0
-                self._children[action] = TreeNode(self, prob)
+                # print("新增的节点：", action)
+                self._children[action] = TreeNode(self, prob, action)
+            else:
+                assert False
+        print("TreeNode:expand: 扩展了{}个节点".format(len(self._children)))
 
     def select(self, c_puct):
         # 扩展
@@ -72,6 +87,7 @@ class TreeNode(object):
         if self._parent:
             # 父子节点分属对立玩家，因此父节点的价值是子节点价值的相反数
             self._parent.update_recursive(-leaf_value)
+        print("TreeNode:update_recursive: 价值回溯，当前节点={}, 节点价值(上帝视角)={}".format(self.name, leaf_value))
         self.update(leaf_value)
 
     def get_value(self, c_puct):
@@ -94,6 +110,9 @@ class TreeNode(object):
     def is_root(self):
         return self._parent is None
 
+    def __str__(self):
+        return self.name
+
 
 class MCTS(object):
     """An implementation of Monte Carlo Tree Search."""
@@ -108,7 +127,8 @@ class MCTS(object):
             converges to the maximum-value policy. A higher value means
             relying on the prior more.
         """
-        self._root = TreeNode(None, 1.0)
+        print("MCTS:init: 初始化 博弈树 MCTS")
+        self._root = TreeNode(None, 1.0, -1)
         self._policy = policy_value_fn  # 策略网络
         self._c_puct = c_puct  # 常数
         self._n_playout = n_playout  #
@@ -118,23 +138,32 @@ class MCTS(object):
         the leaf and propagating it back through its parents.
         State is modified in-place, so a copy must be provided.
         """
+        print("MCTS:_playout: 开始推演, 此时根结点={}, 是否为叶子节点={}".format(self._root.name, self._root.is_leaf()))
         node = self._root
         while(1):
             if node.is_leaf():
+                print("MCTS:_playout: 已经是叶子节点")
                 break
+            print("MCTS:_playout: 不是叶子节点")
+            self._root.printChild()
             # Greedily select next move.
             action, node = node.select(self._c_puct)
+            print("MCTS:_playout: 执行select函数， 选择的action={}".format(action))
             state.do_move(action)
 
         # Evaluate the leaf using a network which outputs a list of
         # (action, probability) tuples p and also a score v in [-1, 1]
         # for the current player.
-        # 输入当前状态为state，输出子节点(对手)的策略分布，新的叶子节点价值(对手价值)
+        # 到这里，说明到达了叶子结点。
+        # 基于策略网络评估叶子节点的价值。输入当前状态为state，输出子节点(对手)的策略分布，新的叶子节点价值(对手价值)
+        print("MCTS:_playout: 已到达叶子结点{}, 当前选手={}, 执行策略推理(过滤非法节点)".format(node.name, state.get_current_player()))
         action_probs, leaf_value = self._policy(state)
+        print("MCTS:_playout: 在叶子节点执行，当前state的【价值评估】(当前选手视角)=", leaf_value)
         # Check for end of game.
         end, winner = state.game_end()
         if not end:
             # node扩展(对手扩展)
+            print("MCTS:_playout: node={}, 对当前叶子节点【执行子节点扩展】".format(node.name))
             node.expand(action_probs)
         else:
             # for end state，return the "true" leaf_value
@@ -144,9 +173,12 @@ class MCTS(object):
                 leaf_value = (
                     1.0 if winner == state.get_current_player() else -1.0
                 )
+                print("MCTS:_playout: 游戏结束, 价值评估矫正为1")
 
         # Update value and visit count of nodes in this traversal.
         # 基于子节点的价值取相反数 更新 当前node的价值
+        # 为什么乘以-1呢？因为还没有执行move，这里得到的value实际是上一手的value，即对手的价值。
+        print("MCTS:_playout: 开始价值回溯")
         node.update_recursive(-leaf_value)
 
     def get_move_probs(self, state, temp=1e-3):
@@ -157,12 +189,18 @@ class MCTS(object):
         """
         # 通过执行指定次数的 MCTS 推演（playout），从当前游戏局面出发，计算出所有合法动作对应的选择概率，
         # 为AI落子提供依据
+        print("MCTS:get_move_probs: 总共需要执行{}次推演".format(self._n_playout))
         for n in range(self._n_playout):
+            print("#" * 30, " ⬇️虚拟推演{}⬇️ ".format(n + 1), "#" * 30)
+            print("MCTS:get_move_probs: MCTS现在深拷贝棋盘(搜索树唯一)，并开始执行第{}次推演".format(n + 1))
             state_copy = copy.deepcopy(state)
             self._playout(state_copy)
 
+        print("MCTS:get_move_probs: 推演完毕！")
+
         # calc the move probabilities based on visit counts at the root node
         # [(动作, 节点访问次数)]
+        print("MCTS:get_move_probs: 获取[(动作, 节点访问次数)]")
         act_visits = [(act, node._n_visits)
                       for act, node in self._root._children.items()]
         acts, visits = zip(*act_visits)
@@ -172,21 +210,24 @@ class MCTS(object):
 
         # act_probs 的核心逻辑是「访问次数越多的动作，对应的概率越大」，
         # 因为 MCTS 的 _playout 过程中，更有价值的动作（胜率更高）会被反复选中，访问次数自然累积更多，这是 MCTS 决策的核心依据。
+        print("MCTS:get_move_probs: 基于访问次数, 计算节点第执行概率")
         act_probs = softmax(1.0/temp * np.log(np.array(visits) + 1e-10))
-
+        print("MCTS:get_move_probs: 返回动作与概率")
         return acts, act_probs
 
-    def update_with_move(self, last_move):
+    def set_root(self, last_move):
         """Step forward in the tree, keeping everything we already know
         about the subtree.
         """
         if last_move in self._root._children:
             # 搜索树复用# 切换根节点
+            print("MCTS:set_root: 搜索树复用, 根节点设置为={},其父节点设置为None".format(last_move))
             self._root = self._root._children[last_move]
             self._root._parent = None
         else:
             # 搜索树重置
-            self._root = TreeNode(None, 1.0)
+            print("MCTS:set_root: 搜索树重置")
+            self._root = TreeNode(None, 1.0, -1)
 
     def __str__(self):
         return "MCTS"
@@ -197,6 +238,7 @@ class MCTSPlayer(object):
 
     def __init__(self, policy_value_function,
                  c_puct=5, n_playout=2000, is_selfplay=0):
+        print("MCTSPlayer:init: 初始化 博弈树玩家 MCTSPlayer")
         self.mcts = MCTS(policy_value_function, c_puct, n_playout)
         self._is_selfplay = is_selfplay
 
@@ -204,18 +246,22 @@ class MCTSPlayer(object):
         self.player = p
 
     def reset_player(self):
-        self.mcts.update_with_move(-1)
+        self.mcts.set_root(-1)
 
     # 基于游戏局面，结合MCTS搜索，最终输出一个具体的落子动作。
     def get_action(self, board, temp=1e-3, return_prob=0):
         # check 是否还有【空位】
         sensible_moves = board.availables
+        print("MCTSPlayer:get_action: 有效动作集合大小={}, 明细={}".format(len(sensible_moves), sensible_moves))
         # the pi vector returned by MCTS as in the alphaGo Zero paper
         move_probs = np.zeros(board.width*board.height)
         if len(sensible_moves) > 0:
+            # 第一次执行get_move_probs的时候确实是从根节点开始的
             acts, probs = self.mcts.get_move_probs(board, temp)
+            print("##############################  ⬆️虚拟推演end⬆️  ##############################")
             move_probs[list(acts)] = probs
-            # 模型训练
+            print("MCTSPlayer:get_action: 动作集合", acts)
+            print("MCTSPlayer:get_action: 概率集合", move_probs)
             if self._is_selfplay:
                 # add Dirichlet Noise for exploration (needed for
                 # self-play training)
@@ -223,9 +269,9 @@ class MCTSPlayer(object):
                     acts,
                     p=0.75*probs + 0.25*np.random.dirichlet(0.3*np.ones(len(probs)))
                 )
+                print("MCTSPlayer:get_action: 最终狄拉克采样动作={}, 并把实际博弈树🌲的根结点(全局维护)转移到该节点".format(move))
                 # update the root node and reuse the search tree
-                # 复用搜索树，将根节点切换为该动作对应的子节点
-                self.mcts.update_with_move(move)
+                self.mcts.set_root(move)
 
             # 实战博弈
             else:
@@ -234,7 +280,7 @@ class MCTSPlayer(object):
                 move = np.random.choice(acts, p=probs)
                 # reset the root node
                 # 重置搜索树，创建全新的根节点，放弃原有搜索结果
-                self.mcts.update_with_move(-1)
+                self.mcts.set_root(-1)
 #                location = board.move_to_location(move)
 #                print("AI move: %d,%d\n" % (location[0], location[1]))
 
